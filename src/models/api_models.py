@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import TypedDict, Union, Dict, Any
 
 class IDogeAPI(TypedDict):
@@ -32,7 +33,7 @@ class IParams(TypedDict):
     page: Union[None, int]
     per_page: Union[None, int]
 
-class IContracts(TypedDict):
+class IRawDogeContracts(TypedDict):
     """
     IContracts: A TypedDict representing the structure of contract data.
     Attributes:

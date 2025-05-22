@@ -3,13 +3,15 @@ import math
 import os
 from typing import List
 
+import pandas as pd
+
 from src.utils.logger import initialize_logger
 from src.scrapers.doge_api import DogeAPIScraper
-from src.models.api_models import IContracts
+from src.scrapers.fpds_scraper import FPDS_Scraper
+from src.models.api_models import IRawDogeContracts
 from src.utils.writer import sanitize_contract, write_contracts_to_csv
 from src.utils.helpers import count_rows_in_csv
 from src.processors.data_cleaner import DOGEApiDataCleaner
-
 from settings import (
     RESULTS_PER_PAGE,
     DOGE_API_FIELDS,
@@ -50,7 +52,7 @@ def main():
         for page_data in doge_scraper.iter_pages(total_pages=number_of_doge_pages):
             if not page_data:
                 continue
-            contracts: List[IContracts] = page_data.get("result", {}).get("contracts", [])
+            contracts: List[IRawDogeContracts] = page_data.get("result", {}).get("contracts", [])
             logging.info("Retrieved %d contracts from this page!", len(contracts))
 
             # Parse the contract data and append to a CSV file.
@@ -78,7 +80,83 @@ def main():
     # Now we should validate the data
     # So check that the columns match and handle any blanks.
     raw_doge_data_cleaner = DOGEApiDataCleaner()
-    raw_doge_data_cleaner.clean_doge_data()
+    cleaned_doge_df = raw_doge_data_cleaner.clean_doge_data()
 
+    # Now we are ready to evaluate the FPDS site
+    # We will only scrape FPDS for rows that have a valid link!
+
+    # First we should add columns to the cleaned_doge_df to have it ready for new data
+    new_columns = [
+        "Buying Org 2",
+        "Buying Org 3",
+        "NAICS",
+        "PSC",
+    ]
+
+    # Add the new columns to the DataFrame with empty values
+    for column in new_columns:
+        cleaned_doge_df[column] = ""
+        
+    # Create FPDS scraper instance
+    fpds_scraper = FPDS_Scraper(cleaned_doge_df)
+    
+    # Process all rows concurrently (can adjust max_workers as needed)
+    logging.info("Starting concurrent processing of FPDS links")
+    results = fpds_scraper.process_rows_concurrently(max_workers=20)
+    
+    # Update the dataframe with the results
+    fpds_scraper.update_dataframe_with_results(results)
+    
+    logging.info("FPDS data extraction completed")
+    
+    # Reorganize columns before saving
+    logging.info("Reorganizing columns for better readability")
+    
+    # Define logical column order
+    column_order = [
+        # Contract identification
+        "PIID",
+        
+        # Organization information (grouped together)
+        "Buying Org 1",
+        "Buying Org 2",
+        "Buying Org 3",
+        
+        # Classification codes (grouped together)
+        "NAICS",
+        "PSC",
+        
+        # Financial information (grouped together)
+        "Total Contract Value (TCV)",
+        "Savings",
+        
+        # Dates
+        "Deleted On"
+    ]
+    
+    # Ensure we only include columns that exist in the dataframe
+    existing_columns = cleaned_doge_df.columns.tolist()
+    ordered_columns = [col for col in column_order if col in existing_columns]
+    
+    # Add any remaining columns that weren't in our ordered list
+    remaining_columns = [col for col in existing_columns if col not in ordered_columns]
+    final_column_order = ordered_columns + remaining_columns
+    
+    # Reorder the dataframe columns
+    cleaned_doge_df = cleaned_doge_df[final_column_order]
+    
+    # Save the data in both CSV and Excel formats
+    csv_path = r"data/processed_doge_data.csv"
+    excel_path = r"data/processed_doge_data.xlsx"
+    
+    # Save as CSV for compatibility
+    cleaned_doge_df.to_csv(csv_path, index=False)
+    logging.info(f"Data saved to {csv_path}")
+    
+    # Save as formatted Excel file
+    from src.utils.excel_exporter import export_doge_data_to_excel
+    export_doge_data_to_excel(cleaned_doge_df, excel_path)
+    logging.info(f"Data saved to {excel_path} with enhanced formatting")
+    
 if __name__ == "__main__":
     main()

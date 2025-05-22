@@ -84,7 +84,7 @@ class DogeAPIScraper:
             "Content-Type" set to "application/json".
         """
         return {
-            "Content-Type": "appication/json"
+            "Content-Type": "application/json"
         }
 
     @api_retry
